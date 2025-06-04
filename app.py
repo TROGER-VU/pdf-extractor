@@ -12,7 +12,7 @@ VERYFI_API_KEY = os.getenv("VERYFI_API_KEY")
 
 client = Client(VERYFI_CLIENT_ID, VERYFI_CLIENT_SECRET, VERYFI_USERNAME, VERYFI_API_KEY)
 
-st.title("Invoice to JSON Converter")
+st.title("Invoice to JSON & Text Converter")
 
 uploaded_file = st.file_uploader("Upload an invoice PDF", type=["pdf"])
 
@@ -35,17 +35,30 @@ if uploaded_file:
     try:
         response = client.process_document(tmp_path, categories)
 
+        # Remove unwanted fields and logo
         cleaned_response = {
             k: v for k, v in response.items()
             if k not in ["meta", "img_thumbnail_url", "img_url", "pdf_url"]
         }
         cleaned_response = remove_logo_field(cleaned_response)
 
+        # Convert JSON to formatted text
+        text_output = cleaned_response.get("ocr_text", "No OCR text found.")
+
+        # Download buttons
         st.download_button(
             "Download JSON",
             data=json.dumps(cleaned_response, indent=2),
             file_name="invoice_data_cleaned.json",
             mime="application/json"
         )
+
+        st.download_button(
+            "Download TXT",
+            data=text_output,
+            file_name="invoice_data.txt",
+            mime="text/plain"
+        )
+
     except Exception as e:
         st.error(f"Error: {e}")
