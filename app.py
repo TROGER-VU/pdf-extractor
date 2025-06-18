@@ -3,6 +3,7 @@ from veryfi import Client
 import tempfile
 import json
 import os
+import fitz  # PyMuPDF
 
 # === LOAD VERYFI CREDENTIALS FROM ENVIRONMENT VARIABLES ===
 VERYFI_CLIENT_ID = os.getenv("VERYFI_CLIENT_ID")
@@ -24,6 +25,20 @@ def remove_logo_field(obj):
     else:
         return obj
 
+def split_pdf(input_pdf_path, chunk_size=3):
+    doc = fitz.open(input_pdf_path)
+    chunks = []
+    for i in range(0, len(doc), chunk_size):
+        subdoc = fitz.open()
+        for j in range(i, min(i + chunk_size, len(doc))):
+            subdoc.insert_pdf(doc, from_page=j, to_page=j)
+        chunk_path = f"{input_pdf_path}_chunk_{i//chunk_size}.pdf"
+        subdoc.save(chunk_path)
+        subdoc.close()
+        chunks.append(chunk_path)
+    doc.close()
+    return chunks
+
 if uploaded_file:
     st.success("File uploaded. Processing...")
 
@@ -31,32 +46,41 @@ if uploaded_file:
         tmp.write(uploaded_file.read())
         tmp_path = tmp.name
 
-    categories = ["Invoices"]
     try:
-        response = client.process_document(tmp_path, categories)
+        all_cleaned_data = []
+        full_ocr_text = ""
+        chunks = split_pdf(tmp_path, chunk_size=3)
 
-        # Remove unwanted fields and logo
-        cleaned_response = {
-            k: v for k, v in response.items()
-            if k not in ["meta", "img_thumbnail_url", "img_url", "pdf_url"]
+        for chunk_path in chunks:
+            response = client.process_document(chunk_path, ["Invoices"])
+
+            cleaned_response = {
+                k: v for k, v in response.items()
+                if k not in ["meta", "img_thumbnail_url", "img_url", "pdf_url"]
+            }
+            cleaned_response = remove_logo_field(cleaned_response)
+            all_cleaned_data.append(cleaned_response)
+
+            text_output = cleaned_response.get("ocr_text", "")
+            full_ocr_text += text_output + "\n\n"
+
+        # Save merged cleaned data if needed
+        merged_data = {
+            "invoices": all_cleaned_data,
+            "combined_ocr_text": full_ocr_text.strip()
         }
-        cleaned_response = remove_logo_field(cleaned_response)
 
-        # Convert JSON to formatted text
-        text_output = cleaned_response.get("ocr_text", "No OCR text found.")
-
-        # Download buttons
         st.download_button(
-            "Download JSON",
-            data=json.dumps(cleaned_response, indent=2),
-            file_name="invoice_data_cleaned.json",
+            "Download Merged JSON",
+            data=json.dumps(merged_data, indent=2),
+            file_name="invoice_data_combined.json",
             mime="application/json"
         )
 
         st.download_button(
-            "Download TXT",
-            data=text_output,
-            file_name="invoice_data.txt",
+            "Download Merged TXT",
+            data=full_ocr_text.strip(),
+            file_name="invoice_data_combined.txt",
             mime="text/plain"
         )
 
